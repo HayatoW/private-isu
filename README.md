@@ -29,7 +29,6 @@
 ## ディレクトリ構成
 
 ```
-├── ansible_old  # [非推奨] 旧バージョンのベンチマーカー・portal用ansible
 ├── benchmarker  # ベンチマーカーのソースコード
 ├── portal       # [非推奨] 旧バージョンのportal
 ├── provisioning # 競技者用・ベンチマーカーインスタンスセットアップ用ansible
