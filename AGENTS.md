@@ -1,5 +1,9 @@
 # Repository Guidelines
 
+This file is the only agent instruction file. There is no `CLAUDE.md`. Follow `README.md` for setup commands and this file for what not to change.
+
+This fork's reference implementation is Rust in `webapp/rust/` only. Ruby / Go / PHP / Python / Node.js app trees are not in this repository. Do not treat `manual.md`, `public_manual.md`, `.github/workflows/ci.yml`, or upstream [catatsuy/private-isu](https://github.com/catatsuy/private-isu) docs as the runbook for this fork: those still describe the original Ruby-default, Docker Compose-first, multi-language contest setup.
+
 ## Preserve the Exercise Before Improving the Code
 
 `private-isu` is an ISUCON practice problem for learning Web application performance tuning. The initial implementations' inefficiency and slowness are part of the exercise, not ordinary technical debt. In this repository, a generally "good" cleanup can be a regression because it removes a bottleneck that participants are meant to discover.
@@ -9,9 +13,9 @@
 - Distinguish intentionally slow code from code that has actually stopped working after an environment update. If the distinction is unclear, ask the user instead of changing it.
 - Make only changes required by the request. Do not include opportunistic fixes, cleanup, formatting, or modernization.
 
-## Cross-Implementation Compatibility
+## Behavior Compatibility With the Original Problem
 
-This fork's reference implementation is Rust in `webapp/rust/`. Externally observable features and behavior must stay aligned with the original private-isu problem (routes, HTML DOM, cookies, CSRF, redirects, and time handling).
+Externally observable features and behavior must stay aligned with the original private-isu problem (routes, HTML DOM, cookies, CSRF, redirects, and time handling).
 
 - Passing the benchmark alone is not evidence that a behavior change is safe.
 - Preserve existing behavior rather than reorganizing the implementation into a preferred handler/repository/service architecture.
