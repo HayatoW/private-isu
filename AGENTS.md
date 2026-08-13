@@ -11,11 +11,10 @@
 
 ## Cross-Implementation Compatibility
 
-`webapp/` contains Ruby, Go, PHP, Python, and Node.js implementations. They do not need identical performance, but their externally observable features and behavior must remain aligned.
+This fork's reference implementation is Rust in `webapp/rust/`. Externally observable features and behavior must stay aligned with the original private-isu problem (routes, HTML DOM, cookies, CSRF, redirects, and time handling).
 
-- For changes affecting routes, the database schema, initialization, sessions, cookies, CSRF, redirects, templates, or time handling, inspect the impact on every language implementation.
-- Passing tests or the benchmark with one language implementation does not prove that the other implementations, or the intended exercise, remain intact.
-- Preserve existing behavior rather than reorganizing an implementation into a preferred handler/repository/service architecture.
+- Passing the benchmark alone is not evidence that a behavior change is safe.
+- Preserve existing behavior rather than reorganizing the implementation into a preferred handler/repository/service architecture.
 
 ## Benchmarker Is Part of the Problem
 
@@ -30,18 +29,54 @@ For updates to dependencies, language runtimes, the OS, MySQL, nginx, Docker, or
 
 ## Repository Layout
 
-- `webapp/{ruby,golang,php,python,node}/` contains the five application implementations.
-- `webapp/sql/` contains the schema and initial data used by setup.
+- `webapp/rust/` contains the Rust reference implementation.
+- `webapp/sql/` contains the schema and initial data used by setup (`dump.sql.bz2` is downloaded by `make init`).
 - `benchmarker/` contains the Go load generator and correctness checks.
 - `provisioning/` contains Ansible configuration for the exercise environment.
 
 ## Verified Commands
 
 - `make init`: download the canonical MySQL dump and image fixtures.
-- `cd webapp/golang && make`: build the Go application as `webapp/golang/app`.
-- `cd webapp/node && npm install && npm run build`: install Node.js dependencies and compile TypeScript. Use `npm run dev` for the development server.
-- `cd webapp && docker compose up`: start the local application, nginx, MySQL, and Memcached stack.
+- `cd webapp/rust && SQLX_OFFLINE=true cargo build --release`: build the Rust application as `webapp/rust/target/release/private-is-rust`. Run it from `webapp/rust` so templates (`./static`) and static files (`../public`) resolve.
 - `cd benchmarker && make`: build `benchmarker/bin/benchmarker`.
-- `cd benchmarker && ./bin/benchmarker -t "http://localhost:8080" -u ./userdata`: run the benchmark against the local target after initialization.
+- `cd benchmarker && ./bin/benchmarker -t "http://localhost:8080" -u ./userdata`: run the benchmark against the host-native app (port 8080).
+- `cd webapp && docker compose up`: start nginx, the app, MySQL, and Memcached. Prefer this on a local Mac, not on Cloud Agent. The Compose stack listens on port 80.
 
 Use the language-native formatter or tests relevant to the requested change, but do not treat their success as authorization to broaden the change. Never commit secrets or downloaded dumps.
+
+## Cursor Cloud specific instructions
+
+Cloud Agents run on Ubuntu. Prefer hosting MySQL, Memcached, and the Rust app directly on the VM. Do not use Docker Compose here: nested Docker plus the CPU/memory limits in `webapp/compose.yml` make the benchmark slower and less representative.
+
+Once per machine:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y mysql-server memcached bzip2 unzip pkg-config libssl-dev build-essential
+sudo systemctl enable --now mysql memcached
+make init
+bunzip2 -c webapp/sql/dump.sql.bz2 | sudo mysql
+sudo mysql <<'SQL'
+CREATE USER IF NOT EXISTS 'isuconp'@'localhost' IDENTIFIED BY 'isuconp';
+CREATE USER IF NOT EXISTS 'isuconp'@'127.0.0.1' IDENTIFIED BY 'isuconp';
+GRANT ALL PRIVILEGES ON *.* TO 'isuconp'@'localhost';
+GRANT ALL PRIVILEGES ON *.* TO 'isuconp'@'127.0.0.1';
+FLUSH PRIVILEGES;
+SQL
+```
+
+Install Rust with rustup if `cargo` is missing. Then, from `webapp/rust`:
+
+```sh
+export SQLX_OFFLINE=true
+cargo build --release
+export ISUCONP_DB_HOST=127.0.0.1
+export ISUCONP_DB_PORT=3306
+export ISUCONP_DB_USER=isuconp
+export ISUCONP_DB_PASSWORD=isuconp
+export ISUCONP_DB_NAME=isuconp
+export ISUCONP_MEMCACHED_ADDRESS=127.0.0.1:11211
+./target/release/private-is-rust
+```
+
+Benchmark against `http://localhost:8080`. See `README.md` for the full host-native and Docker Compose procedures.

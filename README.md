@@ -31,10 +31,10 @@
 ```
 ├── benchmarker  # ベンチマーカーのソースコード
 ├── provisioning # 競技者用・ベンチマーカーインスタンスセットアップ用ansible
-└── webapp       # 各言語の参考実装
+└── webapp       # 参考実装（Rust）
 ```
 
-* [manual.md](/manual.md)は当日マニュアル。一部社内イベントを意識した記述があるので注意すること。
+* [manual.md](/manual.md) は当日マニュアル。一部社内イベントを意識した記述があるので注意すること。
 * [public_manual.md](/public_manual.md) は事前公開レギュレーション
 
 ## OS
@@ -44,47 +44,69 @@ Ubuntu 24.04
 ## 対応言語と状況
 
 本環境では、以下の言語による参考実装が提供されています。
-* Ruby (デフォルトで起動)
-* Go
-* PHP
-* Python
-* Node.js
+
+* Rust（デフォルトで起動）
 
 ## 起動方法
 
-**重要:** 以下のいずれの手順を実行する前にも、まずプロジェクトのルートディレクトリで `make init` を実行して初期データを準備してください。
+Cursor Cloud Agent（Ubuntu）では、MySQL と memcached をホストに入れて Rust 実装を直接起動してください。 Docker Compose は手元の Mac など向けです。
 
-* Ruby、Go、PHP、Python、Node.jsの5言語の参考実装が用意されており、デフォルトではRubyが起動します。
-  * AMIで他の言語の参考実装を動作させる場合は、[`manual.md`](/manual.md)を参照してください。
-* 起動方法として、AMI、Docker Composeなどが用意されています。
-  * ローカル環境で手軽に動作させることも比較的簡単です。
-  * Ansibleを利用すれば、その他の環境でも動作するはずです。
-  * cloud-initも利用可能
+**重要:** いずれの手順の前にも、プロジェクトのルートディレクトリで `make init` を実行して初期データを準備してください。
 
-### 手元で動かす
+* Rust の参考実装は `webapp/rust` にあり、ホスト直接起動時は 8080 番ポートで待ち受けます。
+* 競技者用・ベンチマーカーインスタンスを自分で用意する場合は、`provisioning/` を参照してください。
 
-**注意:** いずれの手順も、ディスク容量に十分な空きがあるマシン上で行ってください。
+### Linux 上で動かす（推奨）
 
-* アプリケーションは、各言語の実行環境とMySQL、memcachedがインストールされていれば動作するはずです。
-* ベンチマーカーは、Goの実行環境と`userdata`ディレクトリがあれば動作します。
-* Docker Composeを使用する場合は、メモリを潤沢に搭載したマシンで実行してください。
+Cloud Agent や Ubuntu ではこの手順を使います。入れ子の Docker Compose よりディスク I/O が安定し、`compose.yml` の CPU / メモリ制限もかかりません。
 
-#### MacやLinux上で適当に動かす
+**注意:** 初期データが大きいため、ディスク容量に十分な空きがあるマシン上で行ってください。
 
-MySQLとmemcachedを起動した上で、以下の手順を実行してください。
-
-* Ruby以外の言語については、それぞれの言語の実行方法を別途確認してください。
-* MySQLのrootユーザーにパスワードが設定されていない前提です。設定されている場合は、適宜手順を読み替えてください。
+必要なパッケージの例（Ubuntu 24.04）:
 
 ```sh
-bunzip2 -c webapp/sql/dump.sql.bz2 | mysql -uroot
+sudo apt-get update
+sudo apt-get install -y mysql-server memcached bzip2 unzip pkg-config libssl-dev build-essential
+sudo systemctl enable --now mysql memcached
+```
 
-cd webapp/ruby
-bundle install --path=vendor/bundle
-bundle exec ruby prepare_unicorn.rb
-bundle exec unicorn -c unicorn_config.rb
-cd ../..
+Rust のツールチェインは [rustup](https://rustup.rs/) で入れてください。ベンチマーカーには Go が必要です。
 
+```sh
+make init
+
+# root は unix_socket 認証のままで初期データを流し込む
+bunzip2 -c webapp/sql/dump.sql.bz2 | sudo mysql
+
+# アプリが TCP でつながるユーザを作る
+sudo mysql <<'SQL'
+CREATE USER IF NOT EXISTS 'isuconp'@'localhost' IDENTIFIED BY 'isuconp';
+CREATE USER IF NOT EXISTS 'isuconp'@'127.0.0.1' IDENTIFIED BY 'isuconp';
+GRANT ALL PRIVILEGES ON *.* TO 'isuconp'@'localhost';
+GRANT ALL PRIVILEGES ON *.* TO 'isuconp'@'127.0.0.1';
+FLUSH PRIVILEGES;
+SQL
+```
+
+アプリケーションは `webapp/rust` で起動します。テンプレートが `./static`、静的ファイルが `../public` にあるためです。 `--release` ビルドでは `ISUCONP_DB_PASSWORD` が必須です。
+
+```sh
+cd webapp/rust
+export SQLX_OFFLINE=true
+cargo build --release
+
+export ISUCONP_DB_HOST=127.0.0.1
+export ISUCONP_DB_PORT=3306
+export ISUCONP_DB_USER=isuconp
+export ISUCONP_DB_PASSWORD=isuconp
+export ISUCONP_DB_NAME=isuconp
+export ISUCONP_MEMCACHED_ADDRESS=127.0.0.1:11211
+./target/release/private-is-rust
+```
+
+別ターミナルでベンチマーカーを実行します。アプリは 8080 番ポートで待ち受けるため、ターゲットは `http://localhost:8080` です。
+
+```sh
 cd benchmarker
 make
 ./bin/benchmarker -t "http://localhost:8080" -u ./userdata
@@ -94,9 +116,32 @@ make
 # {"pass":true,"score":1710,"success":1434,"fail":0,"messages":[]}
 ```
 
+### Docker Compose
+
+手元の Mac など、ホストに MySQL を入れたくない場合に使います。 Cloud Agent 上では入れ子の Docker になるため推奨しません。
+
+起動前に `webapp/sql/dump.sql.bz2` が配置されていないと MySQL に初期データがインポートされないため注意してください。 `make init` で取得できます。
+
+```sh
+cd webapp
+docker compose up
+```
+
+この環境では TCP のポート 80 と 3306 をホストにマッピングします。ホスト側でこれらのポートが使われている場合は、該当プロセスを止めるか `compose.yml` の `ports` を変更してください。
+
+`compose.yml` やアプリケーションの変更を反映するには、`docker compose down` のあと `docker compose up --build` で起動し直してください。
+
+nginx はホストの 80 番ポートで待ち受けるため、ベンチマーカーのターゲットは `http://localhost` です。
+
+```sh
+cd benchmarker
+make
+./bin/benchmarker -t "http://localhost" -u ./userdata
+```
+
 ### 競技者用・ベンチマーカーインスタンスのセットアップ方法
 
-自身でインスタンスをセットアップしたい場合は、`provisioning/`ディレクトリ以下のスクリプトを参照してください。
+自身でインスタンスをセットアップしたい場合は、`provisioning/` ディレクトリ以下のスクリプトを参照してください。
 
 ## 事例集
 
@@ -107,5 +152,8 @@ make
 
 ## 他の言語実装
 
-* Rust実装 https://github.com/Romira915/private-isu-rust
+本リポジトリの参考実装は Rust です。元になった実装は [Romira915/private-isu-rust](https://github.com/Romira915/private-isu-rust) です。
+
+Ruby / Go / PHP / Python / Node.js の参考実装は [catatsuy/private-isu](https://github.com/catatsuy/private-isu) を参照してください。
+
 * Scala実装 https://github.com/catatsuy/private-isu/pull/140
