@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 # Idempotent, one-time repository setup for the private-isu Cloud Agent environment.
 # Installs the Docker runtime (configured for this nested VM), downloads the
-# canonical dataset/image fixtures, prebuilds the benchmarker, and warms the
-# Docker Compose stack (app image + imported MySQL data) so later boots are fast.
+# canonical dataset/image fixtures, prebuilds the benchmarker, and prebuilds/pulls
+# the Docker Compose images so agent boots are fast.
+#
+# NOTE: This deliberately does NOT start MySQL or create its data volume. A
+# populated MySQL/InnoDB volume does not survive the environment snapshot/restore
+# (InnoDB fails with "Operating system error number 22"), so the dataset is
+# imported fresh per boot by start.sh instead.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -34,17 +39,15 @@ make init
 echo "==> [3/5] Building the benchmarker"
 ( cd benchmarker && make )
 
-echo "==> [4/5] Starting the Docker daemon for image build + data import"
+echo "==> [4/5] Starting the Docker daemon for image build/pull"
 # shellcheck source=/dev/null
 source "$REPO_ROOT/.cursor/docker-runtime.sh"
 start_dockerd
 
-echo "==> [5/5] Building the app image and importing the MySQL dataset"
-# Bringing the stack up here bakes the built app image and the ~1.2GB imported
-# MySQL volume into the environment snapshot so agent boots skip the slow import.
-( cd webapp && sudo docker compose up -d )
-wait_for_app
-# Leave the stack stopped in the baseline; start.sh brings it back up per boot.
-( cd webapp && sudo docker compose stop )
+echo "==> [5/5] Building the app image and pulling base images"
+# Bake the built app image and the pulled base images into the snapshot so
+# per-boot startup is fast. Do not start containers or create the MySQL volume.
+( cd webapp && sudo docker compose build )
+( cd webapp && sudo docker compose pull mysql memcached nginx )
 
 echo "==> install.sh complete"

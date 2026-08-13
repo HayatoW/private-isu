@@ -35,18 +35,32 @@ start_dockerd() {
     net.bridge.bridge-nf-call-arptables=0 >/dev/null 2>&1 || true
 }
 
-# Block until nginx serves the application homepage (HTTP 200).
+# Block until MySQL has finished importing and nginx serves the homepage (200).
+# The first boot imports the ~1.2GB dump, so allow several minutes.
 wait_for_app() {
+  local compose_dir="${REPO_ROOT:-/workspace}/webapp"
+
+  echo "    waiting for MySQL to accept connections (first boot imports the dataset)"
+  for _ in $(seq 1 60); do
+    if ( cd "$compose_dir" && sudo docker compose exec -T mysql \
+          mysqladmin ping -uroot -proot >/dev/null 2>&1 ); then
+      echo "    MySQL is ready"
+      break
+    fi
+    sleep 5
+  done
+
   echo "    waiting for the application to answer on http://localhost/"
-  for i in $(seq 1 60); do
-    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://localhost/ || true)"
+  for _ in $(seq 1 60); do
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost/ || true)"
     if [ "$code" = "200" ]; then
-      echo "    application is up (HTTP 200 after ~${i}0s max)"
+      echo "    application is up (HTTP 200)"
       return 0
     fi
-    sleep 10
+    sleep 5
   done
+
   echo "    ERROR: application did not become ready" >&2
-  ( cd "${REPO_ROOT:-/workspace}/webapp" && sudo docker compose logs --tail 30 ) >&2 || true
+  ( cd "$compose_dir" && sudo docker compose logs --tail 40 ) >&2 || true
   return 1
 }
