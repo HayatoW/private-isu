@@ -30,7 +30,6 @@
 
 ```
 ├── benchmarker  # ベンチマーカーのソースコード
-├── portal       # [非推奨] 旧バージョンのportal
 ├── provisioning # 競技者用・ベンチマーカーインスタンスセットアップ用ansible
 └── webapp       # 各言語の参考実装
 ```
